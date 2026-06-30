@@ -45,11 +45,9 @@
     font-variant-numeric: tabular-nums;
   }
   .layout {
-    display: grid;
-    grid-template-rows: 1fr 1fr;
+    display: block;
     height: calc(100% - 10vh);
     padding: 1.5vh 3vw;
-    gap: 1.5vh;
   }
   .section-title {
     font-size: 1.1vw;
@@ -136,13 +134,7 @@
 <div class="layout">
   <div>
     <div class="section-title">METAR / TAF</div>
-    <div class="weather-grid" id="weatherGrid">
-      <div class="card"><div class="station">Loading…</div></div>
-    </div>
-  </div>
-  <div>
-    <div class="section-title">NOTAM</div>
-    <div class="notam-grid" id="notamGrid">
+    <div class="weather-grid" id="weatherGrid" style="height: calc(100% - 2.2vh);">
       <div class="card"><div class="station">Loading…</div></div>
     </div>
   </div>
@@ -154,7 +146,6 @@
   const STATIONS = ["EBOS", "EBAW", "EBFN", "LFQQ"];
   const STATION_PARAM = STATIONS.join(",");
   const METAR_URL_RAW = `https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(STATION_PARAM)}&format=raw&taf=true&hours=1`;
-  const NOTAM_URL_RAW = `https://aviationweather.gov/api/data/notam?ids=${encodeURIComponent(STATION_PARAM)}&format=raw`;
 
   // aviationweather.gov does not send CORS headers, so direct fetch()
   // calls from a browser on a different domain are blocked. Route
@@ -162,7 +153,9 @@
   // the response with the necessary header added.
   const CORS_PROXY = "https://corsproxy.io/?url=";
   const METAR_URL = CORS_PROXY + encodeURIComponent(METAR_URL_RAW);
-  const NOTAM_URL = CORS_PROXY + encodeURIComponent(NOTAM_URL_RAW);
+
+  // NOTE: aviationweather.gov does not publish a public NOTAM endpoint,
+  // so NOTAMs are not included here. See chat for details.
 
   const REFRESH_MS = 60 * 1000; // 1 minute
 
@@ -281,18 +274,11 @@
   async function fetchAll() {
     const statusEl = document.getElementById("status");
     try {
-      const [metarRes, notamRes] = await Promise.all([
-        fetch(METAR_URL, { cache: "no-store" }),
-        fetch(NOTAM_URL, { cache: "no-store" })
-      ]);
+      const metarRes = await fetch(METAR_URL, { cache: "no-store" });
       if (!metarRes.ok) throw new Error("METAR HTTP " + metarRes.status);
-      if (!notamRes.ok) throw new Error("NOTAM HTTP " + notamRes.status);
 
       const metarRaw = await metarRes.text();
-      const notamRaw = await notamRes.text();
-
       renderWeather(parseWeatherBlocks(metarRaw));
-      renderNotams(parseNotamBlocks(notamRaw));
 
       statusEl.textContent = "Last updated: " + new Date().toLocaleTimeString("en-GB", { hour12: false }) + " (local)";
       statusEl.classList.remove("error");
