@@ -2,17 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>OAC Weather & NOTAM Display</title>
+<title>OAC Weather Display</title>
 <style>
   :root {
     --bg: #0a1628;
     --panel: #11213a;
+    --panel-soft: #0e1c30;
     --border: #1e3a5f;
     --accent: #3b82f6;
     --text: #e8edf5;
     --muted: #6b8cae;
     --station: #ffd24a;
-    --notam-accent: #ff8c42;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -45,68 +45,94 @@
     font-variant-numeric: tabular-nums;
   }
   .layout {
-    display: block;
+    display: grid;
+    grid-template-rows: 1.6fr 1fr;
     height: calc(100% - 10vh);
     padding: 1.5vh 3vw;
+    gap: 1.5vh;
   }
   .section-title {
-    font-size: 1.1vw;
+    font-size: 1.05vw;
     color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     margin-bottom: 0.6vh;
+    display: flex;
+    align-items: center;
+    gap: 0.5vw;
   }
-  .weather-grid {
+  .section-title .dot {
+    width: 0.5vw;
+    height: 0.5vw;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* METAR — primary section */
+  .metar-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 1.2vw;
-    height: calc(100% - 2.2vh);
+    height: calc(100% - 2.4vh);
   }
-  .notam-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1.2vw;
-    height: calc(100% - 2.2vh);
-  }
-  .card {
+  .metar-card {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1vh 1vw;
-    overflow-y: auto;
+    border-radius: 12px;
+    padding: 1.4vh 1.2vw;
     display: flex;
     flex-direction: column;
+    justify-content: center;
   }
-  .card .station {
-    font-size: 1.4vw;
+  .metar-card .station {
+    font-size: 1.9vw;
     font-weight: 700;
     color: var(--station);
-    margin-bottom: 0.5vh;
     letter-spacing: 0.04em;
+    margin-bottom: 0.8vh;
   }
-  .notam-grid .card .station {
-    color: var(--notam-accent);
-  }
-  .card pre {
+  .metar-card pre {
     font-family: "Consolas", "Courier New", monospace;
-    font-size: 0.95vw;
-    line-height: 1.45;
+    font-size: 1.25vw;
+    line-height: 1.6;
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text);
   }
-  .notam-item {
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0.6vh;
-    margin-bottom: 0.6vh;
+
+  /* TAF — secondary section */
+  .taf-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1vw;
+    height: calc(100% - 2.4vh);
   }
-  .notam-item:last-child {
-    border-bottom: none;
+  .taf-card {
+    background: var(--panel-soft);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.9vh 1vw;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
   }
-  .card pre .taf-label {
-    color: var(--accent);
-    font-weight: 700;
+  .taf-card .station {
+    font-size: 1.1vw;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    margin-bottom: 0.4vh;
   }
+  .taf-card pre {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 0.78vw;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+    opacity: 0.9;
+  }
+
   .status {
     position: fixed;
     bottom: 0.6vh;
@@ -125,7 +151,7 @@
 
 <div class="header">
   <div>
-    <h1>OAC FLIGHT WEATHER &amp; NOTAM</h1>
+    <h1>OAC FLIGHT WEATHER</h1>
     <div class="sub">EBOS · EBAW · EBFN · LFQQ</div>
   </div>
   <div class="clock" id="clock">--:--:-- UTC</div>
@@ -133,9 +159,15 @@
 
 <div class="layout">
   <div>
-    <div class="section-title">METAR / TAF</div>
-    <div class="weather-grid" id="weatherGrid" style="height: calc(100% - 2.2vh);">
-      <div class="card"><div class="station">Loading…</div></div>
+    <div class="section-title"><span class="dot"></span>METAR</div>
+    <div class="metar-grid" id="metarGrid">
+      <div class="metar-card"><div class="station">Loading…</div></div>
+    </div>
+  </div>
+  <div>
+    <div class="section-title">TAF</div>
+    <div class="taf-grid" id="tafGrid">
+      <div class="taf-card"><div class="station">Loading…</div></div>
     </div>
   </div>
 </div>
@@ -154,9 +186,6 @@
   const CORS_PROXY = "https://corsproxy.io/?url=";
   const METAR_URL = CORS_PROXY + encodeURIComponent(METAR_URL_RAW);
 
-  // NOTE: aviationweather.gov does not publish a public NOTAM endpoint,
-  // so NOTAMs are not included here. See chat for details.
-
   const REFRESH_MS = 60 * 1000; // 1 minute
 
   function updateClock() {
@@ -168,48 +197,68 @@
   updateClock();
 
   // ---------- METAR / TAF parsing ----------
+  // Raw format example:
+  //   EBOS 301650Z VRB03KT 9999 FEW035 18/12 Q1015
+  //   TAF
+  //   EBOS 301700Z 3018/3118 24008KT 9999 FEW035
+  //     BECMG 3021/3023 22012KT
+  // i.e. "TAF" appears alone on its own line, then the next line(s)
+  // belong to that TAF until a new bare ICAO METAR line starts.
   function parseWeatherBlocks(raw) {
-    const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length);
+    const lines = raw.split("\n").map(l => l.trimEnd()).filter(l => l.trim().length);
     const blocks = {};
     let current = null;
+    let mode = null; // "metar" | "taf"
 
-    lines.forEach(line => {
-      const tafIdMatch = line.match(/^TAF\s+([A-Z]{4})/);
+    lines.forEach(rawLine => {
+      const line = rawLine.trim();
+
+      if (line === "TAF") {
+        mode = "taf-pending"; // next line starts the TAF for the current station
+        return;
+      }
+
       const idMatch = line.match(/^([A-Z]{4})\s/);
 
-      if (tafIdMatch) {
-        current = tafIdMatch[1];
-        if (!blocks[current]) blocks[current] = { metar: "", taf: "" };
-        blocks[current].taf = line;
-      } else if (idMatch) {
+      if (idMatch && mode !== "taf-pending") {
+        // New METAR line
         current = idMatch[1];
         if (!blocks[current]) blocks[current] = { metar: "", taf: "" };
         blocks[current].metar = line;
-      } else if (current && blocks[current] && blocks[current].taf) {
+        mode = "metar";
+      } else if (idMatch && mode === "taf-pending") {
+        // First line of a TAF block, station should match current
+        current = idMatch[1];
+        if (!blocks[current]) blocks[current] = { metar: "", taf: "" };
+        blocks[current].taf = line;
+        mode = "taf";
+      } else if (mode === "taf" && current) {
+        // Continuation line of the current TAF (indented forecast groups)
         blocks[current].taf += " " + line;
+      } else if (mode === "metar" && current && !idMatch) {
+        // Rare continuation of a METAR remark line
+        blocks[current].metar += " " + line;
       }
     });
     return blocks;
   }
 
-  function renderWeather(blocks) {
-    const grid = document.getElementById("weatherGrid");
+  function renderMetar(blocks) {
+    const grid = document.getElementById("metarGrid");
     grid.innerHTML = "";
     STATIONS.forEach(id => {
       const data = blocks[id];
       const card = document.createElement("div");
-      card.className = "card";
+      card.className = "metar-card";
+
       const stationEl = document.createElement("div");
       stationEl.className = "station";
       stationEl.textContent = id;
       card.appendChild(stationEl);
 
       const pre = document.createElement("pre");
-      if (data && (data.metar || data.taf)) {
-        let text = "";
-        if (data.metar) text += data.metar + "\n\n";
-        if (data.taf) text += "TAF\n" + data.taf.replace(/^TAF\s+/, "");
-        pre.textContent = text.trim();
+      if (data && data.metar) {
+        pre.textContent = data.metar;
       } else {
         pre.textContent = "No data available";
         pre.classList.add("error");
@@ -219,53 +268,27 @@
     });
   }
 
-  // ---------- NOTAM parsing ----------
-  // Raw NOTAM output blocks are separated by blank lines, each starting
-  // with an entry like "A1234/24 NOTAMN" and containing an ICAO somewhere
-  // in the text (e.g. "Q) EB.../...EBOS..." or via the ids grouping).
-  function parseNotamBlocks(raw) {
-    const chunks = raw.split(/\n\s*\n/).map(c => c.trim()).filter(c => c.length);
-    const blocks = {};
-    STATIONS.forEach(s => blocks[s] = []);
-
-    chunks.forEach(chunk => {
-      // Try to find which station this NOTAM belongs to by matching
-      // the ICAO code anywhere in the text.
-      let matched = STATIONS.find(s => chunk.includes(s));
-      if (matched) {
-        blocks[matched].push(chunk);
-      }
-    });
-    return blocks;
-  }
-
-  function renderNotams(blocks) {
-    const grid = document.getElementById("notamGrid");
+  function renderTaf(blocks) {
+    const grid = document.getElementById("tafGrid");
     grid.innerHTML = "";
     STATIONS.forEach(id => {
-      const items = blocks[id] || [];
+      const data = blocks[id];
       const card = document.createElement("div");
-      card.className = "card";
+      card.className = "taf-card";
+
       const stationEl = document.createElement("div");
       stationEl.className = "station";
       stationEl.textContent = id;
       card.appendChild(stationEl);
 
-      if (items.length) {
-        items.forEach(item => {
-          const wrap = document.createElement("div");
-          wrap.className = "notam-item";
-          const pre = document.createElement("pre");
-          pre.textContent = item;
-          wrap.appendChild(pre);
-          card.appendChild(wrap);
-        });
+      const pre = document.createElement("pre");
+      if (data && data.taf) {
+        pre.textContent = data.taf;
       } else {
-        const pre = document.createElement("pre");
-        pre.textContent = "No active NOTAMs";
+        pre.textContent = "No TAF available";
         pre.classList.add("error");
-        card.appendChild(pre);
       }
+      card.appendChild(pre);
       grid.appendChild(card);
     });
   }
@@ -278,7 +301,9 @@
       if (!metarRes.ok) throw new Error("METAR HTTP " + metarRes.status);
 
       const metarRaw = await metarRes.text();
-      renderWeather(parseWeatherBlocks(metarRaw));
+      const blocks = parseWeatherBlocks(metarRaw);
+      renderMetar(blocks);
+      renderTaf(blocks);
 
       statusEl.textContent = "Last updated: " + new Date().toLocaleTimeString("en-GB", { hour12: false }) + " (local)";
       statusEl.classList.remove("error");
