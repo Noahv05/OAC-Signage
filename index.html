@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OAC Weather & NOTAM Display</title>
+<style>
+  :root {
+    --bg: #0a1628;
+    --panel: #11213a;
+    --border: #1e3a5f;
+    --accent: #3b82f6;
+    --text: #e8edf5;
+    --muted: #6b8cae;
+    --station: #ffd24a;
+    --notam-accent: #ff8c42;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", Arial, sans-serif;
+    overflow: hidden;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.5vh 3vw;
+    border-bottom: 2px solid var(--accent);
+    background: var(--panel);
+  }
+  .header h1 {
+    font-size: 2.2vw;
+    letter-spacing: 0.05em;
+    color: var(--text);
+  }
+  .header .sub {
+    font-size: 1.05vw;
+    color: var(--muted);
+  }
+  .clock {
+    font-size: 1.5vw;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .layout {
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    height: calc(100% - 10vh);
+    padding: 1.5vh 3vw;
+    gap: 1.5vh;
+  }
+  .section-title {
+    font-size: 1.1vw;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.6vh;
+  }
+  .weather-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.2vw;
+    height: calc(100% - 2.2vh);
+  }
+  .notam-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.2vw;
+    height: calc(100% - 2.2vh);
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1vh 1vw;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .card .station {
+    font-size: 1.4vw;
+    font-weight: 700;
+    color: var(--station);
+    margin-bottom: 0.5vh;
+    letter-spacing: 0.04em;
+  }
+  .notam-grid .card .station {
+    color: var(--notam-accent);
+  }
+  .card pre {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 0.95vw;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+  }
+  .notam-item {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.6vh;
+    margin-bottom: 0.6vh;
+  }
+  .notam-item:last-child {
+    border-bottom: none;
+  }
+  .card pre .taf-label {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .status {
+    position: fixed;
+    bottom: 0.6vh;
+    right: 1.5vw;
+    font-size: 0.8vw;
+    color: var(--muted);
+  }
+  .error {
+    color: #ff6b6b;
+  }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>OAC FLIGHT WEATHER &amp; NOTAM</h1>
+    <div class="sub">EBOS · EBAW · EBFN · LFQQ</div>
+  </div>
+  <div class="clock" id="clock">--:--:-- UTC</div>
+</div>
+
+<div class="layout">
+  <div>
+    <div class="section-title">METAR / TAF</div>
+    <div class="weather-grid" id="weatherGrid">
+      <div class="card"><div class="station">Loading…</div></div>
+    </div>
+  </div>
+  <div>
+    <div class="section-title">NOTAM</div>
+    <div class="notam-grid" id="notamGrid">
+      <div class="card"><div class="station">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="status" id="status">Updating…</div>
+
+<script>
+  const STATIONS = ["EBOS", "EBAW", "EBFN", "LFQQ"];
+  const STATION_PARAM = STATIONS.join(",");
+  const METAR_URL_RAW = `https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(STATION_PARAM)}&format=raw&taf=true&hours=1`;
+  const NOTAM_URL_RAW = `https://aviationweather.gov/api/data/notam?ids=${encodeURIComponent(STATION_PARAM)}&format=raw`;
+
+  // aviationweather.gov does not send CORS headers, so direct fetch()
+  // calls from a browser on a different domain are blocked. Route
+  // through a public CORS proxy that fetches server-side and relays
+  // the response with the necessary header added.
+  const CORS_PROXY = "https://corsproxy.io/?url=";
+  const METAR_URL = CORS_PROXY + encodeURIComponent(METAR_URL_RAW);
+  const NOTAM_URL = CORS_PROXY + encodeURIComponent(NOTAM_URL_RAW);
+
+  const REFRESH_MS = 60 * 1000; // 1 minute
+
+  function updateClock() {
+    const now = new Date();
+    document.getElementById("clock").textContent =
+      now.toUTCString().split(" ")[4] + " UTC";
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // ---------- METAR / TAF parsing ----------
+  function parseWeatherBlocks(raw) {
+    const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length);
+    const blocks = {};
+    let current = null;
+
+    lines.forEach(line => {
+      const tafIdMatch = line.match(/^TAF\s+([A-Z]{4})/);
+      const idMatch = line.match(/^([A-Z]{4})\s/);
+
+      if (tafIdMatch) {
+        current = tafIdMatch[1];
+        if (!blocks[current]) blocks[current] = { metar: "", taf: "" };
+        blocks[current].taf = line;
+      } else if (idMatch) {
+        current = idMatch[1];
+        if (!blocks[current]) blocks[current] = { metar: "", taf: "" };
+        blocks[current].metar = line;
+      } else if (current && blocks[current] && blocks[current].taf) {
+        blocks[current].taf += " " + line;
+      }
+    });
+    return blocks;
+  }
+
+  function renderWeather(blocks) {
+    const grid = document.getElementById("weatherGrid");
+    grid.innerHTML = "";
+    STATIONS.forEach(id => {
+      const data = blocks[id];
+      const card = document.createElement("div");
+      card.className = "card";
+      const stationEl = document.createElement("div");
+      stationEl.className = "station";
+      stationEl.textContent = id;
+      card.appendChild(stationEl);
+
+      const pre = document.createElement("pre");
+      if (data && (data.metar || data.taf)) {
+        let text = "";
+        if (data.metar) text += data.metar + "\n\n";
+        if (data.taf) text += "TAF\n" + data.taf.replace(/^TAF\s+/, "");
+        pre.textContent = text.trim();
+      } else {
+        pre.textContent = "No data available";
+        pre.classList.add("error");
+      }
+      card.appendChild(pre);
+      grid.appendChild(card);
+    });
+  }
+
+  // ---------- NOTAM parsing ----------
+  // Raw NOTAM output blocks are separated by blank lines, each starting
+  // with an entry like "A1234/24 NOTAMN" and containing an ICAO somewhere
+  // in the text (e.g. "Q) EB.../...EBOS..." or via the ids grouping).
+  function parseNotamBlocks(raw) {
+    const chunks = raw.split(/\n\s*\n/).map(c => c.trim()).filter(c => c.length);
+    const blocks = {};
+    STATIONS.forEach(s => blocks[s] = []);
+
+    chunks.forEach(chunk => {
+      // Try to find which station this NOTAM belongs to by matching
+      // the ICAO code anywhere in the text.
+      let matched = STATIONS.find(s => chunk.includes(s));
+      if (matched) {
+        blocks[matched].push(chunk);
+      }
+    });
+    return blocks;
+  }
+
+  function renderNotams(blocks) {
+    const grid = document.getElementById("notamGrid");
+    grid.innerHTML = "";
+    STATIONS.forEach(id => {
+      const items = blocks[id] || [];
+      const card = document.createElement("div");
+      card.className = "card";
+      const stationEl = document.createElement("div");
+      stationEl.className = "station";
+      stationEl.textContent = id;
+      card.appendChild(stationEl);
+
+      if (items.length) {
+        items.forEach(item => {
+          const wrap = document.createElement("div");
+          wrap.className = "notam-item";
+          const pre = document.createElement("pre");
+          pre.textContent = item;
+          wrap.appendChild(pre);
+          card.appendChild(wrap);
+        });
+      } else {
+        const pre = document.createElement("pre");
+        pre.textContent = "No active NOTAMs";
+        pre.classList.add("error");
+        card.appendChild(pre);
+      }
+      grid.appendChild(card);
+    });
+  }
+
+  // ---------- Fetch + refresh ----------
+  async function fetchAll() {
+    const statusEl = document.getElementById("status");
+    try {
+      const [metarRes, notamRes] = await Promise.all([
+        fetch(METAR_URL, { cache: "no-store" }),
+        fetch(NOTAM_URL, { cache: "no-store" })
+      ]);
+      if (!metarRes.ok) throw new Error("METAR HTTP " + metarRes.status);
+      if (!notamRes.ok) throw new Error("NOTAM HTTP " + notamRes.status);
+
+      const metarRaw = await metarRes.text();
+      const notamRaw = await notamRes.text();
+
+      renderWeather(parseWeatherBlocks(metarRaw));
+      renderNotams(parseNotamBlocks(notamRaw));
+
+      statusEl.textContent = "Last updated: " + new Date().toLocaleTimeString("en-GB", { hour12: false }) + " (local)";
+      statusEl.classList.remove("error");
+    } catch (err) {
+      statusEl.textContent = "Update failed: " + err.message + " — retrying…";
+      statusEl.classList.add("error");
+    }
+  }
+
+  fetchAll();
+  setInterval(fetchAll, REFRESH_MS);
+</script>
+
+</body>
+</html>
