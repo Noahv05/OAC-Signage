@@ -153,8 +153,17 @@
 <script>
   const STATIONS = ["EBOS", "EBAW", "EBFN", "LFQQ"];
   const STATION_PARAM = STATIONS.join(",");
-  const METAR_URL = `https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(STATION_PARAM)}&format=raw&taf=true&hours=1`;
-  const NOTAM_URL = `https://aviationweather.gov/api/data/notam?ids=${encodeURIComponent(STATION_PARAM)}&format=raw`;
+  const METAR_URL_RAW = `https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(STATION_PARAM)}&format=raw&taf=true&hours=1`;
+  const NOTAM_URL_RAW = `https://aviationweather.gov/api/data/notam?ids=${encodeURIComponent(STATION_PARAM)}&format=raw`;
+
+  // aviationweather.gov does not send CORS headers, so direct fetch()
+  // calls from a browser on a different domain are blocked. Route
+  // through a public CORS proxy that fetches server-side and relays
+  // the response with the necessary header added.
+  const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+  const METAR_URL = CORS_PROXY + encodeURIComponent(METAR_URL_RAW);
+  const NOTAM_URL = CORS_PROXY + encodeURIComponent(NOTAM_URL_RAW);
+
   const REFRESH_MS = 60 * 1000; // 1 minute
 
   function updateClock() {
